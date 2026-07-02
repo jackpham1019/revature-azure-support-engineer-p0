@@ -239,7 +239,7 @@ if __name__ == "__main__":
     # SCRIPT PROCEDURE
     # Perform diagnostics
     # Ask for permission to start deployment
-    # Authenticate via azure cli
+    # Authenticate & provision resources via Azure CLI
     # Deploy to Standard_B1s VM + HDD
     # Configure auto-shutdown schedule
     # Print command for manual exit
