@@ -1,23 +1,10 @@
 """
-
+    Linux Health Diagnostics Tool
 """
-from datetime import datetime 
-import subprocess
-import sys
-from azure_flow import main as azure_flow_main
 
-def run_linux_command(command_list):
-    """Utility function to safely execute a Linux command array"""
-    print(f"Executing: {' '.join(command_list)}")
-    try:
-        # run() executes the command and waits for it to complete
-        result = subprocess.run(command_list, check=True, text=True, capture_output=True)
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"\n Error executing command!", file=sys.stderr)
-        print(f"Error Code: {e.returncode}", file=sys.stderr)
-        print(f"Details: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+from datetime import datetime 
+from azure.deployment_flow import main as azure_flow_main
+from util import run_command
 
 def perform_diagnostics():
     """
@@ -39,7 +26,7 @@ def perform_diagnostics():
     print("=======================")
     print("Checking CPU usage...")
     cpu_command = ["vmstat", "1", "2"]
-    cpu_command_output = run_linux_command(cpu_command).splitlines()
+    cpu_command_output = run_command(cpu_command).splitlines()
     cpu_command_headers = cpu_command_output[1].split()
     cpu_command_values = cpu_command_output[-1].split()
 
@@ -48,7 +35,7 @@ def perform_diagnostics():
     cpu_usage = 100 - float(cpu_idle)
 
     cpu_top_processes_command = ["ps", "-eo", "pid,ppid,comm,%mem,%cpu", "--sort=-%cpu", "--no-headers"]
-    cpu_top_processes_output = run_linux_command(cpu_top_processes_command).splitlines()
+    cpu_top_processes_output = run_command(cpu_top_processes_command).splitlines()
     cpu_top_processes = []
     for process in cpu_top_processes_output[:5]:
         pid, ppid, comm, mem, cpu = process.split(None, 4)
@@ -71,7 +58,7 @@ def perform_diagnostics():
     print("=======================")
     print("Checking memory usage...")
     memory_command = ["free", "-m"]
-    memory_command_output = run_linux_command(memory_command).splitlines()[1]
+    memory_command_output = run_command(memory_command).splitlines()[1]
 
     memory_total = float(memory_command_output.split()[1])
     memory_used = float(memory_command_output.split()[2])
@@ -90,7 +77,7 @@ def perform_diagnostics():
     print("=======================")
     print("Checking disk storage")
     disk_command = ["df", "-m", "/"]
-    disk_output = run_linux_command(disk_command).splitlines()[1]
+    disk_output = run_command(disk_command).splitlines()[1]
 
     disk_total = float(disk_output.split()[1])
     disk_available = float(disk_output.split()[3])
@@ -110,7 +97,7 @@ def perform_diagnostics():
     ports_command = ["ss", "-tulpn"]
     application_services = []
     SYSTEM_PORTS = ["53", "323"]
-    for line in run_linux_command(ports_command).splitlines()[1:]:
+    for line in run_command(ports_command).splitlines()[1:]:
         curLine = line.split()
         curPort = curLine[4].split(":")[-1]
         if curPort in SYSTEM_PORTS:
@@ -256,7 +243,7 @@ if __name__ == "__main__":
         # START of deployment process
         print("Starting deployment process...")
         azure_flow_main()
-        pass
+
     else:
         print_report(report)
         save_report(report)

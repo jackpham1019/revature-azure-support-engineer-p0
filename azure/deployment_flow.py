@@ -1,41 +1,77 @@
-import subprocess
 import os
-import sys
+import time
+from cli.prompt import InteractivePrompt
+from cli.manager import PromptManager
+from cli.option import PromptOption
+from util import run_command
 
-def run_linux_command(command_list):
-    """Utility function to safely execute a Linux command array"""
-    print(f"Executing: {' '.join(command_list)}")
-    try:
-        # run() executes the command and waits for it to complete
-        result = subprocess.run(command_list, check=True, text=True, capture_output=True)
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"\n Error executing command!", file=sys.stderr)
-        print(f"Error Code: {e.returncode}", file=sys.stderr)
-        print(f"Details: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+def prompt_for_teardown(rg_name, vm_name):
+    
+    deallocate_cmd = ["az", "vm", "deallocate", "--name", f"{vm_name}", "--resource-group", f"{rg_name}"]
+    delete_cmd = ["az", "group", "delete", "--name", f"{rg_name}", "--yes"]
 
-def run_az_command(command_list):
-    """Utility function to safely execute an Azure CLI command array"""
-    print(f"Executing: {' '.join(command_list)}")
-    try:
-        result = subprocess.run(command_list, check=True, text=True, capture_output=True)
-        if result.stdout:
-            print(result.stdout)
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"\n[ERROR] Command failed with return code {e.returncode}!", file=sys.stderr)
-        print(f"Details: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+    prompt = InteractivePrompt(
+        "How would you like to end the VM? (Enter 0 to exit prompt)",
+        [
+            PromptOption(
+                "Temporarily stop the VM and suspend compute billing (deallocate VM)", 
+                InteractivePrompt(
+                    "Would you like to wait for the deallocation to complete?",
+                    [
+                        PromptOption(
+                            "Yes", 
+                            deallocate_cmd, 
+                            exit_after=True),
+                        PromptOption(
+                            "No",
+                            [
+                                *deallocate_cmd, 
+                                "--no-wait"
+                            ], 
+                            exit_after=True)
+                    ]
+                )
+            ),
+                                  
+              
+            PromptOption(
+                "Permanently delete the VM, disk, networks, and the resource group", 
+                InteractivePrompt(
+                    "Would you like to wait for the deletion to complete?", 
+                    [
+                        PromptOption(
+                            "Yes",
+                            delete_cmd, 
+                            exit_after=True),
+                        PromptOption(
+                            "No", 
+                            [
+                                *delete_cmd, 
+                                "--no-wait"
+                            ],
+                            exit_after=True)
+                    ]
+                )
+            )
+        ]
+    )
+
+    prompt_manager = PromptManager(prompt_stack=[prompt])
+    prompt_manager.run()
 
 def main():
+
+    start_time = time.perf_counter()
+
     print("=== Azure SRE DOcker Compose Automated Deployment Pipeline using Python ===")
 
     # 1. Capture user inputs
     rg_name = input("Enter Resource Group [rg-project-0]: ").strip() or "rg-project-0"
     vm_name = input("Enter VM Name [vm-appserver-project-0]: ").strip() or "vm-appserver-project-0"
-    nsg_name = f"{vm_name}-NSG"
     location = input("Enter Region [canadaeast]: ").strip() or "canadaeast"
+
+    nsg_name = f"{vm_name}-NSG"
+
     port = "8081"
     ssh_key_path = os.path.expanduser(f"~/.ssh/{rg_name}_{vm_name}_key")
     source_bootstrap_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bootstrap_vm.sh")
@@ -47,7 +83,7 @@ def main():
             "-b", "4096",
             "-f", ssh_key_path, 
             "-N", ""]  # Generate SSH key pair for the VM
-        run_linux_command(generate_ssh_key_cm)
+        run_command(generate_ssh_key_cm)
     else:
         print(f"SSH key already exists: {ssh_key_path}")
 
@@ -56,15 +92,16 @@ def main():
     print(f"- VM Name: {vm_name}")
     print(f"- Location: {location}")
     print(f"- Exposed Port: {port}\n")
+    print()
 
     # 2. Create Resource Group
     print("=== 2. Ensuring Resource Group Exists ===")
     create_rg_cmd = ["az", "group", "create", "--name", rg_name, "--location", location, "--output", "table"]
-    run_az_command(create_rg_cmd)
+    run_command(create_rg_cmd)
 
     # 3. Create VM 
     check_vm_cmd = ["az", "vm", "list", "-g", rg_name, "--query", f"[?name=='{vm_name}'].name", "-o", "tsv"]
-    vm_check_output = run_az_command(check_vm_cmd).strip()
+    vm_check_output = run_command(check_vm_cmd).strip()
 
     if not vm_check_output:
         print(f"VM {vm_name} not found. Provisioning now...")
@@ -82,10 +119,11 @@ def main():
             "--location", location,
             "--output", "table"
         ]
-        run_az_command(create_vm_cmd)
+        run_command(create_vm_cmd)
     else:
         print(f"VM {vm_name} already exists")
-    
+    print()
+
     # 4. Open Port 8081 Inbound
     print("=== 4. Opening NSG Port 8081 Inbound ===")
     create_nsg_cmd = [
@@ -101,7 +139,8 @@ def main():
         "--description", "Allow FastAPI web traffic on port 8081",
         "--output", "table"
     ]
-    run_az_command(create_nsg_cmd)
+    run_command(create_nsg_cmd)
+    print()
 
     # 5a. Retrieve public IP of the new VM and SCP bootstrap script to remote VM
     print("=== 5a. Retrieving Public IP of the VM ===")
@@ -112,7 +151,8 @@ def main():
         "--query", "[0].virtualMachine.network.publicIpAddresses[0].ipAddress",
         "-o", "tsv"
     ]
-    vm_public_ip = run_az_command(get_vm_public_ip_cmd).strip().replace("\r", "")
+    vm_public_ip = run_command(get_vm_public_ip_cmd).strip().replace("\r", "")
+    print()
 
     print(f"=== 5b. Copying Bootstrap Script to Remote VM ({vm_public_ip}) ===")
     scp_cmd = [
@@ -123,7 +163,8 @@ def main():
         source_bootstrap_path,
         f"azureuser@{vm_public_ip}:~/"
     ]
-    run_az_command(scp_cmd)
+    run_command(scp_cmd)
+    print()
 
     # 6. SSH and run the remote bootstrap script to set up Docker, Docker Compose, and deploy the FastAPI application
     print("=== 6. SSH into VM and Execute Bootstrap Script ===")
@@ -135,26 +176,20 @@ def main():
         f"azureuser@{vm_public_ip}",
         "sudo bash ~/bootstrap_vm.sh"
     ]
-    run_az_command(ssh_cmd)
+    run_command(ssh_cmd)
+    print()
 
+    print(f"Deployment Complete: ")
+    print(f"API Endpoint - http://{vm_public_ip}:{port}")
+    print(f"FastAPI Swagger UI: http://{vm_public_ip}:{port}/docs")
+    print()
 
-    print(f"Deployment Complete: API Endpoint - http://{vm_public_ip}:{port}")
+    elapsed_time = time.perf_counter() - start_time
+    print(f"Total Deployment Time: {elapsed_time:.2f} seconds")
+    print()
 
     print("\n=== 9. How to End/Teardown VM (Cost Control) ===")
-    
-    # Interactive prompt
-        # App display instruction/prompt
-        # App display options
-
-        # User input
-        # App validate input
-
-        # App execute action based on input
-        # If option is another prompt, repeat the process
-    print("To temporarily stop the VM and suspend compute billing (deallocate VM):")
-    print(f"az vm deallocate --name {vm_name} --resource-group {rg_name} --no-wait")
-    print("\nTo permanently delete the VM, disk, networks, and the resource group:")
-    print(f"az group delete --name {rg_name} --no-wait --yes")
+    prompt_for_teardown(rg_name, vm_name)
 
 if __name__ == "__main__":
     main()
