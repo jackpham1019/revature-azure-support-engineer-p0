@@ -44,7 +44,7 @@ def check_cpu():
     print("Checking CPU usage...")
 
     cpu_command = ["vmstat", "1", "2"]
-    cpu_command_output = run_command(cpu_command).splitlines()
+    cpu_command_output = run_command(cpu_command, print_result=False).splitlines()
 
     cpu_command_headers = cpu_command_output[1].split()
     cpu_command_values = cpu_command_output[-1].split()
@@ -61,7 +61,7 @@ def check_memory():
     print("Checking memory usage...")
 
     memory_command = ["free", "-m"]
-    memory_command_output = run_command(memory_command).splitlines()[1]
+    memory_command_output = run_command(memory_command, print_result=False).splitlines()[1]
 
     values = memory_command_output.split()
     memory_total = float(values[1])
@@ -77,7 +77,7 @@ def check_disk():
     print("Checking disk storage...")
 
     disk_command = ["df", "-m", "/"]
-    disk_output = run_command(disk_command).splitlines()[1]
+    disk_output = run_command(disk_command, print_result=False).splitlines()[1]
 
     values = disk_output.split()
     disk_total = float(values[1])
@@ -100,7 +100,7 @@ def check_listening_ports():
     ports_command = ["ss", "-tulpn"]
     listening_ports = []
 
-    for line in run_command(ports_command).splitlines()[1:]:
+    for line in run_command(ports_command, print_result=False).splitlines()[1:]:
         parts = line.split()
 
         if len(parts) < 5:
@@ -109,7 +109,6 @@ def check_listening_ports():
         protocol = parts[0]
         local_address = parts[4]
 
-        print(local_address)
         # Handles examples like:
         # 127.0.0.1:8000
         # 0.0.0.0:80

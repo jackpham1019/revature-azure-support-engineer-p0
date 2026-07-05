@@ -1,10 +1,13 @@
 """
-    Linux Health Diagnostics Tool
+    Linux Health Diagnostics & Log Analysis Tool
 """
+
+import os
 
 from azure.deployment_flow import main as azure_flow_main
 from diagnostics.tool import run_analysis_and_get_report
 from diagnostics.util import save_report
+from diagnostics.log_processor import run_analysis_and_get_report as run_log_analysis
 
 if __name__ == "__main__":
     # SCRIPT PROCEDURE
@@ -17,6 +20,14 @@ if __name__ == "__main__":
         # Print command for manual exit
 
     report = run_analysis_and_get_report()
+    
+    log_file_path = os.path.join(
+        os.path.dirname(__file__),
+        "diagnostics",
+        "sample_logs.txt"
+    )
+
+    log_summary = run_log_analysis(log_file_path)
 
     user_decision = input("Do you want to deploy the tool to Azure? (y/n) [n]: ").strip().lower()
     valid_decisions = ["y", "n", "", "yes", "no"]
@@ -31,5 +42,6 @@ if __name__ == "__main__":
 
     else:
         print(report)
-        save_report(report)
+        save_report("linux_diagnostics", report)
+        save_report("log_summary", log_summary)
         print("Report saved successfully.")

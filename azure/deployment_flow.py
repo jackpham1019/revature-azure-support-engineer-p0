@@ -1,14 +1,36 @@
 import os
 import time
+import requests
+
+from textwrap import dedent
+from dotenv import load_dotenv
 from cli.prompt import InteractivePrompt
 from cli.manager import PromptManager
 from cli.option import PromptOption
 from util import run_command
 
+load_dotenv()
+
+def send_discord_notification(username, message):
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+
+    payload = {
+        "username": username,
+        "content": message
+    }
+
+    response = requests.post(
+        webhook_url,
+        json=payload,
+        timeout=10
+    )
+
+    response.raise_for_status()
+    
 def prompt_for_teardown(rg_name, vm_name):
     
-    deallocate_cmd = ["az", "vm", "deallocate", "--name", f"{vm_name}", "--resource-group", f"{rg_name}"]
-    delete_cmd = ["az", "group", "delete", "--name", f"{rg_name}", "--yes"]
+    deallocate_cmd = ["az", "vm", "deallocate", "--name", vm_name, "--resource-group", rg_name]
+    delete_cmd = ["az", "group", "delete", "--name", rg_name, "--yes"]
 
     prompt = InteractivePrompt(
         "How would you like to end the VM? (Enter 0 to exit prompt)",
@@ -61,7 +83,7 @@ def prompt_for_teardown(rg_name, vm_name):
 
 def main():
 
-    start_time = time.perf_counter()
+    deployment_start_time = time.perf_counter()
 
     print("=== Azure SRE DOcker Compose Automated Deployment Pipeline using Python ===")
 
@@ -99,7 +121,7 @@ def main():
     create_rg_cmd = ["az", "group", "create", "--name", rg_name, "--location", location, "--output", "table"]
     run_command(create_rg_cmd)
 
-    # 3. Create VM 
+    # 3a. Check and create VM if not exists
     check_vm_cmd = ["az", "vm", "list", "-g", rg_name, "--query", f"[?name=='{vm_name}'].name", "-o", "tsv"]
     vm_check_output = run_command(check_vm_cmd).strip()
 
@@ -120,9 +142,48 @@ def main():
             "--output", "table"
         ]
         run_command(create_vm_cmd)
-    else:
-        print(f"VM {vm_name} already exists")
+
+    # 3b. Retrieve public IP of the VM
+    print("=== 3b. Retrieving Public IP of the VM ===")
+    get_vm_public_ip_cmd = [
+        "az", "vm", "list-ip-addresses",
+        "-g", rg_name,
+        "-n", vm_name,
+        "--query", "[0].virtualMachine.network.publicIpAddresses[0].ipAddress",
+        "-o", "tsv"
+    ]
+    vm_public_ip = run_command(get_vm_public_ip_cmd).strip().replace("\r", "")
     print()
+
+    # 3. If VM already exists, send skipped notification to Discord, and prompt for teardown operations
+    if vm_check_output:
+        print(f"VM {vm_name} already exists")
+    
+        # 3c. Sending deployment skipped notification to Discord
+        print("\n=== 3c. Sending deployment skipped notification to Discord ===")
+        send_discord_notification(
+            "Python Automation Script",
+            dedent(f"""
+                VM {vm_name} already exists
+                
+                Public IP - http://{vm_public_ip}
+            """)
+        )
+        print()
+        prompt_for_teardown(rg_name, vm_name)
+        return
+        
+    vm_provision_time = time.perf_counter() - deployment_start_time
+
+    # 3d. Configure Auto-Shutdown schedule
+    shutdown_time = "2100"
+    auto_shutdown_cmd = [
+        "az", "vm", "auto-shutdown", 
+        "-g", rg_name, 
+        "-n", vm_name, 
+        "--time", shutdown_time,
+        "-o", "none"]
+    run_command(auto_shutdown_cmd)
 
     # 4. Open Port 8081 Inbound
     print("=== 4. Opening NSG Port 8081 Inbound ===")
@@ -141,20 +202,29 @@ def main():
     ]
     run_command(create_nsg_cmd)
     print()
+        
+    # 5. Sending deployment successful notification to Discord
+    print("\n=== 5b. Sending deployment successful notification to Discord ===")
+    send_discord_notification(
+        "Python Automation Script",
+        dedent(f"""
+            VM Provisioned successfully
+            
+            Resource Group: {rg_name}
+            VM Name: {vm_name}
+            Public IP - http://{vm_public_ip}
+            
+            Deployment time: {vm_provision_time//3600:.0f}h {((vm_provision_time% 3600) //60):.0f}m {vm_provision_time%60:.0f}s
 
-    # 5a. Retrieve public IP of the new VM and SCP bootstrap script to remote VM
-    print("=== 5a. Retrieving Public IP of the VM ===")
-    get_vm_public_ip_cmd = [
-        "az", "vm", "list-ip-addresses",
-        "-g", rg_name,
-        "-n", vm_name,
-        "--query", "[0].virtualMachine.network.publicIpAddresses[0].ipAddress",
-        "-o", "tsv"
-    ]
-    vm_public_ip = run_command(get_vm_public_ip_cmd).strip().replace("\r", "")
+            Auto-Shutdown: VM is configured to shut down daily at 5PM EDT
+        """)
+    )
     print()
+    
+    bootstrap_start_time = time.perf_counter()
 
-    print(f"=== 5b. Copying Bootstrap Script to Remote VM ({vm_public_ip}) ===")
+    # 6. SCP bootstrap script to remote VM
+    print(f"=== 6. Copying Bootstrap Script to Remote VM ({vm_public_ip}) ===")
     scp_cmd = [
         "scp",
         "-o", "StrictHostKeyChecking=no",
@@ -166,8 +236,8 @@ def main():
     run_command(scp_cmd)
     print()
 
-    # 6. SSH and run the remote bootstrap script to set up Docker, Docker Compose, and deploy the FastAPI application
-    print("=== 6. SSH into VM and Execute Bootstrap Script ===")
+    # 7a. SSH and run the remote bootstrap script to set up Docker, Docker Compose, and deploy the FastAPI application
+    print("=== 7a. SSH into VM and Execute Bootstrap Script ===")
     ssh_cmd = [
         "ssh",
         "-o", "StrictHostKeyChecking=no",
@@ -176,20 +246,52 @@ def main():
         f"azureuser@{vm_public_ip}",
         "sudo bash ~/bootstrap_vm.sh"
     ]
-    run_command(ssh_cmd)
+    run_command(ssh_cmd, print_result=False)
     print()
 
-    print(f"Deployment Complete: ")
-    print(f"API Endpoint - http://{vm_public_ip}:{port}")
-    print(f"FastAPI Swagger UI: http://{vm_public_ip}:{port}/docs")
+    bootstrap_time = time.perf_counter() - bootstrap_start_time
+
+    # 7b. Send bootstrapping completion notification to Discord
+    print("\n=== 7b. Sending notification to Discord ===")
+    send_discord_notification(
+        "Python Automation Script",
+        dedent(f"""
+            VM bootstrapped successfully
+            Demo application is ready
+               
+            VM Name: {vm_name}
+
+            API Endpoint - http://{vm_public_ip}:{port}
+            Health check: http://{vm_public_ip}:{port}/health
+            DB check: http://{vm_public_ip}:{port}/db-check
+            
+            VM bootstrap time: {bootstrap_time//3600:.0f}h {((bootstrap_time% 3600) //60):.0f}m {bootstrap_time%60:.0f}s
+        """)
+    )
     print()
 
-    elapsed_time = time.perf_counter() - start_time
-    print(f"Total Deployment Time: {elapsed_time:.2f} seconds")
+
+    elapsed_time = time.perf_counter() - deployment_start_time
+    print(f"Total Deployment & Bootstrap Time: {elapsed_time:.2f} seconds")
     print()
 
-    print("\n=== 9. How to End/Teardown VM (Cost Control) ===")
+    print("\n=== 8. How to End/Teardown VM (Cost Control) ===")
     prompt_for_teardown(rg_name, vm_name)
 
+def start_deployment():
+    try:
+        main()
+    except Exception as e:
+        send_discord_notification(
+            f"Azure VM",
+            dedent(f"""
+            ❌ Deployment Failed
+
+            Error: {type(e).__name__}
+            Message: {e}     
+            """)
+        )
+        raise
+
 if __name__ == "__main__":
-    main()
+    start_deployment()

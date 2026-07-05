@@ -2,12 +2,12 @@
 import subprocess
 import sys
 
-def run_command(command_list):
+def run_command(command_list, display_command=True, print_result=True):
     """Utility function to safely execute a command array"""
     print(f"Executing: {' '.join(command_list)}")
     try:
         result = subprocess.run(command_list, check=True, text=True, capture_output=True)
-        if result.stdout:
+        if result.stdout and print_result:
             print(result.stdout)
         return result.stdout
     except subprocess.CalledProcessError as e:
