@@ -81,6 +81,22 @@ def prompt_for_teardown(rg_name, vm_name):
     prompt_manager = PromptManager(prompt_stack=[prompt])
     prompt_manager.run()
 
+def azure_cli_login():
+    azure_cli_login_cmd = [
+        "az", "login",
+        "--service-principal", 
+        "--username", os.getenv("AZURE_CLIENT_ID"),
+        "--password", os.getenv("AZURE_CLIENT_SECRET"),
+        "--tenant", os.getenv("AZURE_TENANT_ID")
+    ]
+    run_command(azure_cli_login_cmd, display_command=False, print_result=False)
+
+    set_subscription_cmd = [
+        "az", "account", "set",
+        "--subscription", os.getenv("AZURE_SUBSCRIPTION_ID")
+    ]
+    run_command(set_subscription_cmd, display_command=False, print_result=False)
+
 def main():
 
     deployment_start_time = time.perf_counter()
@@ -156,22 +172,22 @@ def main():
     print()
 
     # 3. If VM already exists, send skipped notification to Discord, and prompt for teardown operations
-    if vm_check_output:
-        print(f"VM {vm_name} already exists")
+    # if vm_check_output:
+    #     print(f"VM {vm_name} already exists")
     
-        # 3c. Sending deployment skipped notification to Discord
-        print("\n=== 3c. Sending deployment skipped notification to Discord ===")
-        send_discord_notification(
-            "Python Automation Script",
-            dedent(f"""
-                VM {vm_name} already exists
+    #     # 3c. Sending deployment skipped notification to Discord
+    #     print("\n=== 3c. Sending deployment skipped notification to Discord ===")
+    #     send_discord_notification(
+    #         "Python Automation Script",
+    #         dedent(f"""
+    #             VM {vm_name} already exists
                 
-                Public IP - http://{vm_public_ip}
-            """)
-        )
-        print()
-        prompt_for_teardown(rg_name, vm_name)
-        return
+    #             Public IP - http://{vm_public_ip}
+    #         """)
+    #     )
+    #     print()
+    #     prompt_for_teardown(rg_name, vm_name)
+    #     return
         
     vm_provision_time = time.perf_counter() - deployment_start_time
 
@@ -280,10 +296,11 @@ def main():
 
 def start_deployment():
     try:
+        azure_cli_login()
         main()
     except Exception as e:
         send_discord_notification(
-            f"Azure VM",
+            "Python Automation Script",
             dedent(f"""
             ❌ Deployment Failed
 

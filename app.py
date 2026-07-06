@@ -4,7 +4,7 @@
 
 import os
 
-from azure.deployment_flow import main as azure_flow_main
+from azure.deployment_flow import start_deployment
 from diagnostics.tool import run_analysis_and_get_report
 from diagnostics.util import save_report
 from diagnostics.log_processor import run_analysis_and_get_report as run_log_analysis
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     if user_decision in ["y", "yes"]:
         # START of deployment process
         print("Starting deployment process...")
-        azure_flow_main()
+        start_deployment()
 
     else:
         print(report)

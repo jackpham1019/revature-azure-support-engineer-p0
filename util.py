@@ -13,4 +13,4 @@ def run_command(command_list, display_command=True, print_result=True):
     except subprocess.CalledProcessError as e:
         print(f"\n[ERROR] Command failed with return code {e.returncode}!", file=sys.stderr)
         print(f"Details: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+        raise
